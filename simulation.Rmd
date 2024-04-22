@@ -1,0 +1,121 @@
+---
+title: "P values near 0.05 are not suspicious"
+output:
+  html_document:
+    df_print: paged
+---
+
+In response to https://www.tiktok.com/@lthlnkso/video/7359626007747267886 and https://www.tiktok.com/@lthlnkso/video/7360025549193874730 - why pvalues close to 0.05 are not suspicious.
+
+```{r, results=FALSE, error=FALSE, message=FALSE}
+
+library(tidyverse)
+library(pwr)
+library(janitor)
+library(broom)
+
+options(scipen = 999)
+set.seed(1234554321)
+
+```
+
+Let's assume a situation in which we measure the height of people in centimeters:
+
+```{r}
+
+popmean <- 175 # Population average height
+sd <- 20 # Standard deviation (which we assume to be the same for the population and the sample)
+
+```
+
+We are interested in if the general population differs from a certain sample (e.g., inhabitants of a certain town).
+
+We design an experiment with 80% statistical power to detect a small effect size (Cohen's d = 0.2).
+
+```{r}
+
+d <- 0.2 # A 'small' effect size
+power <- pwr.t.test(n = NULL, d = d, sig.level = 0.05, power = 0.8, type = "one.sample")
+n <- power$n %>% round_half_up(digits = 0) # n = 198
+
+```
+
+We now simulate a scenario in which the effect size is indeed 0.2; the sample from the town we are interested in has a slightly higher height than the general population. In other words, there is an effect and the null hypothesis does not hold.
+
+Let's run the experiment 100 thousand (100,000) times:
+
+```{r}
+
+generateResult <- function(n_samples, sample_size, sample_mean, sample_sd, population_mean) {
+  i <- 0
+  result_df <- data.frame()
+  while (i < n_samples) {
+    i <- i + 1
+    # cat("... ", i, " / ", n_samples, " ...\n")
+    
+    sample <- rnorm(sample_size, mean = sample_mean, sd = sample_sd) %>% round_half_up(digits = 0)
+    
+    result <- t.test(x = sample, mu = population_mean) %>% tidy()
+    result_df <- result_df %>% bind_rows(result)
+  }
+  
+  return(result_df)
+}
+
+res <- generateResult(
+  n_samples = 100000,
+  
+  sample_size = n,
+  sample_mean = popmean + power$d * sd,
+  sample_sd = sd,
+  
+  population_mean = popmean
+)
+
+head(res, 5) # This shows the 5 top rows from our simulation (100k rows total)
+
+```
+
+As expected, you can see our share of true positives is close to the power level (80%):
+
+```{r}
+
+truePositivesShare <- sum(res$p.value < 0.05) / nrow(res)
+cat("True positive share:", truePositivesShare, "\n") # Corresponds to the power level
+
+
+```
+
+This is how our distribution of pvalues looks across the 100,000 experiments we ran:
+
+```{r}
+
+# Plot the distribution of the pvalues
+plot <- ggplot(data = res) +
+  aes(x = p.value) +
+  geom_histogram(
+    binwidth = 0.001
+  )
+plot
+
+```
+
+We can now compare the number of expected pvalues between 0.04 and 0.05 under both the null hypothesis and the alternative hypothesis. As a reminder, the null hypothesis is false in this scenario (and the alternative is true):
+
+```{r}
+
+cat("# of pvalues (total):", nrow(res), "\n")
+cat("# of pvalues between 0.04 and 0.05 expected under the (false) null:", 0.01 * nrow(res), "\n")
+cat("# of pvalues between 0.04 and 0.05 found under the (true) alternative:", sum(res$p.value >= 0.04 & res$p.value < 0.05))
+
+```
+
+Thus, in this very typical research setting with relatively good power (please note: what is desirable power should be decided upon in the context of the study, but 80% is an often cited standard), pvalues between 0.04 and 0.05 are more likely to occur under the alternative than under the null. This means that such pvalues, which may be regarded as 'close to 0.05', are not suspicious at all.
+
+In fact, in many scenarios, they may be even less suspicious; when power is lower, more pvalues between 0.04 and 0.05 would occur under the alternative. Studies indicate that power may often be much lower (e.g., <https://academic.oup.com/beheco/article/14/3/438/257415> ).
+
+Indeed, when one has very high statistical power, a pvalue of 0.04 may be more likely to occur under the null hypothesis than under the alternative (see <http://daniellakens.blogspot.com/2021/11/why-p-values-should-be-interpreted-as-p.html> ). Thus, a pvalue below 0.05 can also be interpreted as evidence against the null in certain scenarios. However, achieving such high power is unrealistic in many scenarios. Besides that, it is difficult to estimate effect sizes and thus considerable uncertainty exists about the actual statistical power of experiments (meaning we just do not know how pvalues are truly distributed under the alternative).
+
+The only certainty we have about pvalues is that they are equally distributed under the null hypothesis. Thus, when we see a pvalue under a certain alpha level, we know just that that is relatively unlikely to occur if there were no effect.
+
+Besides that, pvalues should always be interpreted in the broader context of the study (and in the context of our behaviour as researchers). There are however no natural properties of pvalues which make pvalues close to 0.05 inherently more suspicious than other pvalues.
